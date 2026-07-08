@@ -11,7 +11,12 @@ import (
 	"hellcat/parser"
 )
 
+type LogConfig struct {
+	LogLevel string `json:"loglevel"`
+}
+
 type XrayConfig struct {
+	Log       *LogConfig    `json:"log,omitempty"`
 	Inbounds  []interface{} `json:"inbounds"`
 	Outbounds []interface{} `json:"outbounds"`
 }
@@ -26,6 +31,43 @@ func GenerateWithPort(cfg *parser.VLESSConfig, port int) string {
 		"security": cfg.Security,
 	}
 
+	// Transport settings
+	switch cfg.Network {
+	case "ws":
+		wsSettings := map[string]interface{}{
+			"path": cfg.Path,
+		}
+		if cfg.HostHeader != "" {
+			wsSettings["headers"] = map[string]interface{}{
+				"Host": cfg.HostHeader,
+			}
+		}
+		stream["wsSettings"] = wsSettings
+	case "grpc":
+		grpcSettings := map[string]interface{}{
+			"serviceName": cfg.ServiceName,
+		}
+		if cfg.Mode != "" {
+			grpcSettings["mode"] = cfg.Mode
+		}
+		if cfg.Authority != "" {
+			grpcSettings["authority"] = cfg.Authority
+		}
+		stream["grpcSettings"] = grpcSettings
+	case "xhttp", "splithttp":
+		xhttpSettings := map[string]interface{}{
+			"path": cfg.Path,
+		}
+		if cfg.HostHeader != "" {
+			xhttpSettings["host"] = cfg.HostHeader
+		}
+		if cfg.Mode != "" {
+			xhttpSettings["mode"] = cfg.Mode
+		}
+		stream["xhttpSettings"] = xhttpSettings
+	}
+
+	// TLS / Reality
 	if cfg.Security == "reality" {
 		stream["realitySettings"] = map[string]interface{}{
 			"serverName":  cfg.SNI,
@@ -41,6 +83,7 @@ func GenerateWithPort(cfg *parser.VLESSConfig, port int) string {
 	}
 
 	xrayConf := XrayConfig{
+		Log: &LogConfig{LogLevel: "none"}, // отключаем все логи xray
 		Inbounds: []interface{}{
 			map[string]interface{}{
 				"port":     port,
@@ -82,7 +125,9 @@ func GenerateWithPort(cfg *parser.VLESSConfig, port int) string {
 	}
 	defer f.Close()
 
-	if err := json.NewEncoder(f).Encode(xrayConf); err != nil {
+	encoder := json.NewEncoder(f)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(xrayConf); err != nil {
 		log.Fatalf("[hellcat] Error encoding config JSON: %v", err)
 	}
 
