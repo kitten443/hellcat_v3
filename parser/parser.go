@@ -1,5 +1,4 @@
 // [hellcat]
-
 package parser
 
 import (
@@ -11,8 +10,6 @@ import (
     "net/url"
     "strings"
 )
-
-// ==================== OutboundConfig ====================
 
 type OutboundConfig struct {
     Tag           string         `json:"tag"`
@@ -89,8 +86,6 @@ type HappyEyeballs struct {
     TryDelayMs       int  `json:"tryDelayMs"`
 }
 
-// ===== Settings: VLESS / VMess =====
-
 type VnextSettings struct {
     Vnext []Vnext `json:"vnext"`
 }
@@ -125,8 +120,6 @@ type VMessUser struct {
     Flow     string `json:"flow,omitempty"`
 }
 
-// ===== Settings: SS / Trojan / Hy2 / Tuic =====
-
 type ServerSettings struct {
     Servers []ServerEntry `json:"servers"`
 }
@@ -145,8 +138,6 @@ type ServerEntry struct {
     UdpRelayMode          string   `json:"udpRelayMode,omitempty"`
     Alpn                  []string `json:"alpn,omitempty"`
 }
-
-// ==================== Helpers ====================
 
 func getParam(params url.Values, key, fallback string) string {
     if val, ok := params[key]; ok && len(val) > 0 && val[0] != "" {
@@ -212,8 +203,6 @@ func defaultMux() MuxConfig {
     return MuxConfig{Enabled: false, Concurrency: -1}
 }
 
-// ==================== Dispatcher ====================
-
 func Parse(rawURL string) (*OutboundConfig, error) {
     switch {
     case strings.HasPrefix(rawURL, "vless://"):
@@ -231,8 +220,6 @@ func Parse(rawURL string) (*OutboundConfig, error) {
     }
     return nil, fmt.Errorf("unknown protocol scheme")
 }
-
-// ==================== VLESS ====================
 
 func ParseVLESS(rawURL string) (*OutboundConfig, error) {
     u, err := url.Parse(rawURL)
@@ -262,7 +249,7 @@ func ParseVLESS(rawURL string) (*OutboundConfig, error) {
     if enc == "" {
         enc = "none"
     }
-    flow := q.Get("flow") // Чтение параметра flow
+    flow := q.Get("flow")
 
     stream := &StreamSetting{
         Network:   transport,
@@ -348,15 +335,13 @@ func ParseVLESS(rawURL string) (*OutboundConfig, error) {
                 Users: []User{{
                     Id:         uuid,
                     Encryption: enc,
-                    Flow:       flow, // Добавление flow (если пусто, omitempty не запишет поле в JSON)
+                    Flow:       flow,
                     Level:      8,
                 }},
             }},
         },
     }, nil
 }
-
-// ==================== VMess ====================
 
 type vmessLink struct {
     V    string `json:"v"`
@@ -458,14 +443,12 @@ func ParseVMess(rawURL string) (*OutboundConfig, error) {
                     Id:       v.Id,
                     AlterId:  aid,
                     Security: v.Scy,
-                    Flow:     v.Flow, // Добавление flow (если пусто, omitempty не запишет поле в JSON)
+                    Flow:     v.Flow,
                 }},
             }},
         },
     }, nil
 }
-
-// ==================== Shadowsocks ====================
 
 func ParseShadowsocks(rawURL string) (*OutboundConfig, error) {
     if !strings.HasPrefix(rawURL, "ss://") {
@@ -548,8 +531,6 @@ func ParseShadowsocks(rawURL string) (*OutboundConfig, error) {
         },
     }, nil
 }
-
-// ==================== Trojan ====================
 
 func ParseTrojan(rawURL string) (*OutboundConfig, error) {
     u, err := url.Parse(rawURL)
@@ -656,8 +637,6 @@ func ParseTrojan(rawURL string) (*OutboundConfig, error) {
     }, nil
 }
 
-// ==================== Hysteria2 ====================
-
 func ParseHy2(rawURL string) (*OutboundConfig, error) {
     u, err := url.Parse(rawURL)
     if err != nil {
@@ -699,8 +678,6 @@ func ParseHy2(rawURL string) (*OutboundConfig, error) {
         },
     }, nil
 }
-
-// ==================== TUIC ====================
 
 func ParseTuic(rawURL string) (*OutboundConfig, error) {
     u, err := url.Parse(rawURL)
@@ -747,8 +724,6 @@ func ParseTuic(rawURL string) (*OutboundConfig, error) {
         },
     }, nil
 }
-
-// ==================== Lines ====================
 
 func Lines(input string) []string {
     var result []string
