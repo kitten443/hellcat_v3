@@ -1,5 +1,4 @@
 // [hellcat]
-
 package main
 
 import (
@@ -26,6 +25,7 @@ func main() {
     insane := flag.Bool("insane", false, "Insane mode")
     stealth := flag.Bool("stealth", false, "Use pseudo-load (Google/YouTube/etc.) instead of heavy downloads")
     customTarget := flag.String("target", "", "Custom download URL (overrides built-in list)")
+    fakelogin := flag.Bool("fakelogin", false, "Rotate UUID/Password every 1000 requests") // НОВОЕ
     flag.Parse()
 
     var configs []*parser.OutboundConfig
@@ -58,7 +58,8 @@ func main() {
         log.Fatal("No valid proxy links found.")
     }
 
-    stressor.Run(configs, *threadCount, *duration, *numXray, *insane, *stealth, *customTarget)
+  
+    stressor.Run(configs, *threadCount, *duration, *numXray, *insane, *stealth, *customTarget, *fakelogin)
 }
 
 func min(a, b int) int {
