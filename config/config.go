@@ -1,5 +1,4 @@
 // [hellcat]
-
 package config
 
 import (
@@ -77,7 +76,7 @@ func GenerateWithPort(cfg *parser.OutboundConfig, port int) string {
         Outbounds: []interface{}{outbound},
     }
 
-    fileName := fmt.Sprintf("config_%d_%s.json", port, time.Now().Format("150405"))
+    fileName := fmt.Sprintf("config_%d_%s.json", port, time.Now().Format("15040"))
     f, err := os.Create(fileName)
     if err != nil {
         log.Fatalf("Error writing config file: %v", err)
