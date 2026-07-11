@@ -1,4 +1,4 @@
-# HellCat
+# HellCat v3 fork by kitten443
 
 A high–intensity VLESS/SS/TROJAN/HYSTERIA/VMESS pentesting-testing stress tool using xray-core and Go.
 
