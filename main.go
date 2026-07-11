@@ -1,4 +1,3 @@
-// [hellcat]
 package main
 
 import (
@@ -12,6 +11,7 @@ import (
 )
 
 func main() {
+    
     matches, _ := filepath.Glob("config*.json")
     for _, f := range matches {
         os.Remove(f)
@@ -19,13 +19,13 @@ func main() {
 
     vlessURL := flag.String("url", "", "Proxy link (vless/vmess/trojan/ss/hy2/tuic)")
     listFile := flag.String("list", "", "File with links")
-    threadCount := flag.Int("threads", 50, "Threads per proxy")
+    threadCount := flag.Int("threads", 200, "Threads per proxy (было 50)")       // 🔥 УВЕЛИЧЕНО
     duration := flag.Int("duration", 0, "Duration in seconds (0=infinite)")
-    numXray := flag.Int("instances", 10, "Number of xray-core processes")
-    insane := flag.Bool("insane", false, "Insane mode")
-    stealth := flag.Bool("stealth", false, "Use pseudo-load (Google/YouTube/etc.) instead of heavy downloads")
+    numXray := flag.Int("instances", 20, "Number of xray-core processes (было 10)") // 🔥 УВЕЛИЧЕНО
+    insane := flag.Bool("insane", false, "Insane mode (2x workers, burst=8)")
+    stealth := flag.Bool("stealth", false, "Use pseudo-load instead of heavy downloads")
     customTarget := flag.String("target", "", "Custom download URL (overrides built-in list)")
-    fakelogin := flag.Bool("fakelogin", false, "Rotate UUID/Password every 1000 requests") // НОВОЕ
+    fakelogin := flag.Bool("fakelogin", false, "Rotate UUID/Password every 1000 requests")
     flag.Parse()
 
     var configs []*parser.OutboundConfig
@@ -45,7 +45,7 @@ func main() {
         for _, raw := range urls {
             cfg, err := parser.Parse(raw)
             if err != nil {
-                log.Printf("[!] Parse error (%s): %v", raw[:min(40, len(raw))], err)
+                log.Printf("[!] Parse error (%s): %v", raw[:min(len(raw), 40)], err)
                 continue
             }
             configs = append(configs, cfg)
@@ -58,7 +58,6 @@ func main() {
         log.Fatal("No valid proxy links found.")
     }
 
-  
     stressor.Run(configs, *threadCount, *duration, *numXray, *insane, *stealth, *customTarget, *fakelogin)
 }
 
