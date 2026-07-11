@@ -1,4 +1,3 @@
-// [hellcat]
 package config
 
 import (
