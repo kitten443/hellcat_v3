@@ -159,10 +159,12 @@ type XrayInstance struct {
     Cfg      *parser.OutboundConfig
     Port     int
     ConfPath string
-    cleanup  func() // Функция очистки временного файла
+    cleanup  func()
     done     chan struct{}
     mu       sync.Mutex
     proxyURL atomic.Value
+    ops      uint64
+    rotating int32
 }
 
 type Stressor struct {
@@ -197,28 +199,9 @@ type Stressor struct {
     sem           chan struct{}
 }
 
-var bufPool = sync.Pool{
-    New: func() interface{} {
-        return make([]byte, 1024*1024)
-    },
-}
-
 func fastDiscard(r io.Reader) (int64, bool) {
-    buf := bufPool.Get().([]byte)
-    defer bufPool.Put(buf)
-    var total int64
-    success := true
-    for {
-        n, err := r.Read(buf)
-        total += int64(n)
-        if err != nil {
-            if err != io.EOF {
-                success = false
-            }
-            break
-        }
-    }
-    return total, success
+    n, err := io.Copy(io.Discard, r)
+    return n, err == nil
 }
 
 func formatSpeed(bytesPerSec float64) string {
@@ -312,17 +295,18 @@ func (s *Stressor) startInstance(i int) (*XrayInstance, error) {
     cmd.Stderr = nil
 
     if err := cmd.Start(); err != nil {
-        cleanup() // Убираем за собой файл, если xray не запустился
+        cleanup()
         return nil, err
     }
 
+    done := make(chan struct{})
     inst := &XrayInstance{
         Cmd:      cmd,
         Cfg:      cfg,
         Port:     port,
         ConfPath: confPath,
         cleanup:  cleanup,
-        done:     make(chan struct{}),
+        done:     done,
     }
     pURL, _ := url.Parse(fmt.Sprintf("socks5h://127.0.0.1:%d", port))
     inst.proxyURL.Store(pURL)
@@ -331,7 +315,7 @@ func (s *Stressor) startInstance(i int) (*XrayInstance, error) {
         if err := cmd.Wait(); err != nil && s.ctx.Err() == nil {
             log.Printf("[hellcat] ⚠️ xray [port %d] exited: %v", port, err)
         }
-        close(inst.done)
+        close(done)
     }()
 
     return inst, nil
@@ -361,7 +345,7 @@ func (s *Stressor) restartInstance(inst *XrayInstance) {
 
     if err := cmd.Start(); err != nil {
         log.Printf("[hellcat] ❌ Failed to start new xray on port %d: %v", newPort, err)
-        newCleanup() // Удаляем новый файл, если процесс не стартовал
+        newCleanup()
         return
     }
 
@@ -395,7 +379,7 @@ func (s *Stressor) restartInstance(inst *XrayInstance) {
         if cmd.Process != nil {
             cmd.Process.Kill()
         }
-        newCleanup() // Удаляем новый файл, если прокси не прогрелся
+        newCleanup()
         select {
         case <-newDone:
         case <-time.After(shutdownTimeout):
@@ -420,7 +404,7 @@ func (s *Stressor) restartInstance(inst *XrayInstance) {
         oldCmd.Process.Kill()
     }
     if oldCleanup != nil {
-        oldCleanup() // Вот здесь мы избавляемся от утечки старых файлов!
+        oldCleanup()
     }
     if oldDone != nil {
         select {
@@ -704,16 +688,16 @@ func Run(parentCtx context.Context, cfgs []*parser.OutboundConfig, threads, dura
             continue
         }
         client := s.clients[i]
+        inst := s.instances[i]
         for j := 0; j < streamsPerProxy; j++ {
             s.wg.Add(1)
-            go s.worker(client)
+            go s.worker(inst, client)
         }
     }
 
     ticker := time.NewTicker(statsInterval)
     defer ticker.Stop()
 
-    var lastRotationReq uint64 = 0
     lastTickTime := time.Now()
 
     for {
@@ -739,19 +723,21 @@ func Run(parentCtx context.Context, cfgs []*parser.OutboundConfig, threads, dura
                 inFlight, s.maxInFlight,
                 atomic.LoadInt32(&s.cpuUsage), atomic.LoadInt32(&s.throttleMs))
 
-            if s.fakeLogin && succ > 0 {
-                currentThousand := succ / 1000
-                lastThousand := lastRotationReq / 1000
-                if currentThousand > lastThousand {
-                    lastRotationReq = succ
-                    log.Printf("[hellcat] 🔑 Crossed %dk requests! Rotating...", currentThousand*1000)
-                    go func() {
-                        for _, inst := range s.instances {
-                            if inst != nil {
-                                s.restartInstance(inst)
-                            }
+            if s.fakeLogin {
+                for _, inst := range s.instances {
+                    if inst == nil {
+                        continue
+                    }
+                    if atomic.LoadUint64(&inst.ops) >= 1000 {
+                        if atomic.CompareAndSwapInt32(&inst.rotating, 0, 1) {
+                            atomic.StoreUint64(&inst.ops, 0)
+                            log.Printf("[hellcat] 🔑 Instance on port %d crossed 1000 ops! Rotating...", inst.Port)
+                            go func(i *XrayInstance) {
+                                s.restartInstance(i)
+                                atomic.StoreInt32(&i.rotating, 0)
+                            }(inst)
                         }
-                    }()
+                    }
                 }
             }
         }
@@ -778,7 +764,7 @@ cleanup:
     log.Println("[hellcat] ✅ Finished.")
 }
 
-func (s *Stressor) worker(client *http.Client) {
+func (s *Stressor) worker(inst *XrayInstance, client *http.Client) {
     defer s.wg.Done()
     atomic.AddInt32(&s.activeWorkers, 1)
     defer atomic.AddInt32(&s.activeWorkers, -1)
@@ -796,9 +782,9 @@ func (s *Stressor) worker(client *http.Client) {
                     return
                 default:
                     if s.stealthMode {
-                        s.stealthSingle(client)
+                        s.stealthSingle(inst, client)
                     } else {
-                        s.downloadSingle(client)
+                        s.downloadSingle(inst, client)
                     }
                 }
             }
@@ -818,7 +804,7 @@ func (s *Stressor) worker(client *http.Client) {
     }
 }
 
-func (s *Stressor) downloadSingle(client *http.Client) {
+func (s *Stressor) downloadSingle(inst *XrayInstance, client *http.Client) {
     if len(s.payloadURLs) == 0 {
         return
     }
@@ -837,6 +823,7 @@ func (s *Stressor) downloadSingle(client *http.Client) {
     req, err := http.NewRequestWithContext(ctx, "GET", target, nil)
     if err != nil {
         atomic.AddUint64(&s.errors, 1)
+        atomic.AddUint64(&inst.ops, 1)
         return
     }
 
@@ -847,6 +834,7 @@ func (s *Stressor) downloadSingle(client *http.Client) {
     resp, err := client.Do(req)
     if err != nil {
         atomic.AddUint64(&s.errors, 1)
+        atomic.AddUint64(&inst.ops, 1)
         timer := time.NewTimer(errorSleepBase + time.Duration(s.rand.Int63n(int64(errorSleepJitter))))
         select {
         case <-ctx.Done():
@@ -859,6 +847,7 @@ func (s *Stressor) downloadSingle(client *http.Client) {
 
     if resp.ContentLength == 0 {
         atomic.AddUint64(&s.requests, 1)
+        atomic.AddUint64(&inst.ops, 1)
         return
     }
 
@@ -870,9 +859,10 @@ func (s *Stressor) downloadSingle(client *http.Client) {
     } else {
         atomic.AddUint64(&s.errors, 1)
     }
+    atomic.AddUint64(&inst.ops, 1)
 }
 
-func (s *Stressor) stealthSingle(client *http.Client) {
+func (s *Stressor) stealthSingle(inst *XrayInstance, client *http.Client) {
     if len(s.stealthURLs) == 0 {
         return
     }
@@ -891,6 +881,7 @@ func (s *Stressor) stealthSingle(client *http.Client) {
     req, err := http.NewRequestWithContext(ctx, "GET", target, nil)
     if err != nil {
         atomic.AddUint64(&s.errors, 1)
+        atomic.AddUint64(&inst.ops, 1)
         return
     }
 
@@ -900,6 +891,7 @@ func (s *Stressor) stealthSingle(client *http.Client) {
     resp, err := client.Do(req)
     if err != nil {
         atomic.AddUint64(&s.errors, 1)
+        atomic.AddUint64(&inst.ops, 1)
         timer := time.NewTimer(errorSleepBase + time.Duration(s.rand.Int63n(int64(errorSleepJitter))))
         select {
         case <-ctx.Done():
@@ -912,6 +904,7 @@ func (s *Stressor) stealthSingle(client *http.Client) {
 
     if resp.ContentLength == 0 {
         atomic.AddUint64(&s.requests, 1)
+        atomic.AddUint64(&inst.ops, 1)
         return
     }
 
@@ -923,4 +916,5 @@ func (s *Stressor) stealthSingle(client *http.Client) {
     } else {
         atomic.AddUint64(&s.errors, 1)
     }
+    atomic.AddUint64(&inst.ops, 1)
 }
