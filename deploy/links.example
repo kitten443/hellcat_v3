@@ -1,0 +1,15 @@
+# One proxy share link per line.
+# Lines starting with # and blank lines are ignored.
+#
+# Supported schemes:
+#   vless://  vmess://  ss://  trojan://  hysteria2://  hy2://
+#
+# TUIC is not supported by Xray-core and will be skipped with an error.
+#
+# Keep this file mode 0640 and never commit real credentials.
+
+# vless://11111111-1111-1111-1111-111111111111@example.com:443?type=ws&security=tls&host=cdn.example.com&path=%2Fws&sni=cdn.example.com#example-vless
+# vmess://BASE64_PAYLOAD
+# ss://YWVzLTI1Ni1nY206c2VjcmV0@example.com:8388#example-ss
+# trojan://password@example.com:443?type=ws&security=tls&host=cdn.example.com&path=%2Ft#example-trojan
+# hysteria2://password@example.com:443?sni=example.com&obfs=salamander&obfs-password=secret#example-hy2

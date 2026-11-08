@@ -1,0 +1,42 @@
+[Unit]
+Description=HellCat proxy bandwidth / stress tester
+Documentation=https://github.com/kitten443/hellcat_v3
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/lib/hellcat
+# Defaults for a small/medium server; EnvironmentFile entries override them.
+Environment=HELLCAT_ARGS=--instances 20 --threads 200 --inflight 10000 --cpu 65
+EnvironmentFile=-/etc/hellcat/hellcat.env
+ExecStart=/usr/local/bin/hellcat --list /etc/hellcat/links.txt $HELLCAT_ARGS
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitCORE=0
+TasksMax=10000
+
+# Moderate hardening. Xray only needs to open outbound sockets and a local
+# SOCKS listener, so it does not need privileges.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hellcat
+
+# Recommended for production: create an unprivileged account and uncomment.
+#   useradd --system --home-dir /var/lib/hellcat --shell /usr/sbin/nologin hellcat
+#   chown -R hellcat:hellcat /var/lib/hellcat
+#   chown root:hellcat /etc/hellcat/links.txt /etc/hellcat/hellcat.env
+#   chmod 0640 /etc/hellcat/links.txt /etc/hellcat/hellcat.env
+# User=hellcat
+# Group=hellcat
+
+# Optional CPU cap. Leave unset if you want hellcat's own --cpu throttling to
+# control the load.
+# CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target

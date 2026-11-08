@@ -1,0 +1,16 @@
+# Build output
+/hellcat
+/dist/
+
+# Local runtime artifacts
+hellcat_tmp_*
+*.log
+*.pid
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+
+# Local test links — never commit real proxy credentials
+links.txt
