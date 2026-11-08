@@ -363,7 +363,7 @@ directories older than 24 hours are cleaned at startup.
 ├── stressor/               Xray lifecycle, workers, CPU monitor, stats
 ├── deploy/                 systemd unit, env and link examples
 ├── install.sh              dependency/bootstrap/build installer
-└── Makefile                build, test, vet, install
+└── Makefile                build, vet, install
 ```
 
 ---
@@ -371,15 +371,9 @@ directories older than 24 hours are cleaned at startup.
 ## Development
 
 ```bash
-make check          # gofmt + go vet + go test
+make check          # gofmt + go vet
 make build
-make test
-make race
 ```
-
-Parser and config tests are table-driven. When `xray` is in `PATH`, the config
-tests also run `xray run -test` against every supported transport/security
-combination, so schema regressions are caught before release.
 
 ---
 

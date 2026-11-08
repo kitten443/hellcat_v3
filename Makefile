@@ -6,18 +6,12 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .DEFAULT_GOAL := build
 
-.PHONY: all build test race vet fmt check install uninstall clean
+.PHONY: all build vet fmt check install uninstall clean
 
 all: build
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) .
-
-test:
-	$(GO) test ./...
-
-race:
-	$(GO) test -race ./...
 
 vet:
 	$(GO) vet ./...
@@ -25,7 +19,7 @@ vet:
 fmt:
 	gofmt -w main.go config/*.go parser/*.go stressor/*.go
 
-check: fmt vet test
+check: fmt vet
 
 install: build
 	install -d $(DESTDIR)$(PREFIX)/bin

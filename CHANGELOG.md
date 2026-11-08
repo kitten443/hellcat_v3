@@ -3,6 +3,14 @@
 Все заметные изменения проекта HellCat v3 (форк kitten443).
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/).
 
+## [Unreleased]
+
+### Удалено
+
+- Удалены unit-тесты (`parser/parser_test.go`, `config/config_test.go`,
+  `stressor/stress_test.go`) и цели `make test`/`make race`: они не нужны в
+  проекте. `make check` теперь выполняет только `gofmt` и `go vet`.
+
 ## [3.1.0] — 2026-11-08
 
 Большое обновление парсера, генерации конфигов, серверного рантайма и

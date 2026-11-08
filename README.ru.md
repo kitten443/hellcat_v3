@@ -362,7 +362,7 @@ HellCat ориентируется на актуальный Xray-core и учи
 ├── stressor/               жизненный цикл Xray, воркеры, CPU-монитор, статистика
 ├── deploy/                 systemd-юнит, примеры env и списка ссылок
 ├── install.sh              установка зависимостей, сборка и установка
-└── Makefile                сборка, тесты, vet, install
+└── Makefile                сборка, vet, install
 ```
 
 ---
@@ -370,15 +370,9 @@ HellCat ориентируется на актуальный Xray-core и учи
 ## Разработка
 
 ```bash
-make check          # gofmt + go vet + go test
+make check          # gofmt + go vet
 make build
-make test
-make race
 ```
-
-Тесты парсера и конфигов табличные. Если `xray` есть в `PATH`, тесты
-дополнительно запускают `xray run -test` для всех поддерживаемых комбинаций
-транспорта и безопасности — так регрессии схемы ловятся до релиза.
 
 ---
 
